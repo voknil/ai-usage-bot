@@ -93,7 +93,7 @@ while true; do
       set_button_text "$chat_id" "$message_id" "⏳ Обновляю..."
     fi
 
-    if CLAUDE_USAGE_FORCE_CLI_CAPTURE=1 "$status_script" >/dev/null 2>&1; then
+    if CLAUDE_USAGE_FORCE_CLI_CAPTURE=1 CLAUDE_SERVICE_STATUS_FORCE_CAPTURE=1 OPENAI_SERVICE_STATUS_FORCE_CAPTURE=1 "$status_script" >/dev/null 2>&1; then
       answer_callback "$callback_id" "✅ Обновлено"
     else
       if [[ -n "$chat_id" && -n "$message_id" ]]; then

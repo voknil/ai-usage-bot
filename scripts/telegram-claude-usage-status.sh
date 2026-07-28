@@ -11,6 +11,13 @@ usage_file="${CLAUDE_USAGE_STATE:-$project_dir/state/status.json}"
 state_file="${CLAUDE_STATUS_MESSAGE_STATE:-$project_dir/state/telegram-message.json}"
 api_capture_script="$script_dir/claude-usage-api-capture.sh"
 cli_capture_script="$script_dir/claude-usage-cli-capture.sh"
+openai_capture_script="$script_dir/openai-usage-capture.sh"
+openai_usage_file="${OPENAI_USAGE_STATE:-$project_dir/state/openai-status.json}"
+anthropic_status_capture_script="$script_dir/claude-service-status-capture.sh"
+openai_status_capture_script="$script_dir/openai-service-status-capture.sh"
+anthropic_status_file="${CLAUDE_SERVICE_STATUS_STATE:-$project_dir/state/anthropic-service-status.json}"
+openai_status_file="${OPENAI_SERVICE_STATUS_STATE:-$project_dir/state/openai-service-status.json}"
+alert_state_file="${CLAUDE_USAGE_ALERT_STATE:-$project_dir/state/usage-alerts.json}"
 status_log="${CLAUDE_STATUS_LOG:-$project_dir/logs/status.log}"
 
 if [[ ! -f "$env_file" ]]; then
@@ -100,12 +107,135 @@ if [[ "${CLAUDE_USAGE_SKIP_CLI_CAPTURE:-}" != "1" && -x "$cli_capture_script" &&
   fi
 fi
 
+openai_age_seconds=999999
+if [[ -f "$openai_usage_file" ]]; then
+  openai_mtime="$(mtime_epoch "$openai_usage_file")"
+  openai_age_seconds="$(( $(date +%s) - openai_mtime ))"
+fi
+
+if [[ "${OPENAI_USAGE_SKIP_CAPTURE:-}" != "1" && -x "$openai_capture_script" && ( "${OPENAI_USAGE_FORCE_CAPTURE:-}" == "1" || "$openai_age_seconds" -gt 240 ) ]]; then
+  "$openai_capture_script" >/dev/null 2>>"$status_log" || printf '%s openai_capture_failed\n' "$(date -u '+%Y-%m-%dT%H:%M:%SZ')" >> "$status_log"
+fi
+
+anthropic_status_age_seconds=999999
+if [[ -f "$anthropic_status_file" ]]; then
+  anthropic_status_age_seconds="$(( $(date +%s) - $(mtime_epoch "$anthropic_status_file") ))"
+fi
+if [[ "${CLAUDE_SERVICE_STATUS_SKIP_CAPTURE:-}" != "1" && -x "$anthropic_status_capture_script" && ( "${CLAUDE_SERVICE_STATUS_FORCE_CAPTURE:-}" == "1" || "$anthropic_status_age_seconds" -gt 240 ) ]]; then
+  "$anthropic_status_capture_script" >/dev/null 2>>"$status_log" || printf '%s anthropic_status_capture_failed\n' "$(date -u '+%Y-%m-%dT%H:%M:%SZ')" >> "$status_log"
+fi
+
+openai_status_age_seconds=999999
+if [[ -f "$openai_status_file" ]]; then
+  openai_status_age_seconds="$(( $(date +%s) - $(mtime_epoch "$openai_status_file") ))"
+fi
+if [[ "${OPENAI_SERVICE_STATUS_SKIP_CAPTURE:-}" != "1" && -x "$openai_status_capture_script" && ( "${OPENAI_SERVICE_STATUS_FORCE_CAPTURE:-}" == "1" || "$openai_status_age_seconds" -gt 240 ) ]]; then
+  "$openai_status_capture_script" >/dev/null 2>>"$status_log" || printf '%s openai_status_capture_failed\n' "$(date -u '+%Y-%m-%dT%H:%M:%SZ')" >> "$status_log"
+fi
+
+# --- Optional threshold alerts (85% / 95%) for Claude 5h, Claude week, Codex week.
+# Sends a standalone Telegram message per threshold crossed, and deletes those
+# messages once the corresponding window actually resets (resets_at moves forward).
+mkdir -p "$(dirname "$alert_state_file")"
+[[ -f "$alert_state_file" ]] || echo '{"windows":{}}' > "$alert_state_file"
+
+alert_plan="$(python3 - "$usage_file" "$openai_usage_file" "$alert_state_file" <<'PY'
+import json, sys
+
+claude_path, openai_path, alert_path = sys.argv[1:4]
+
+def load(path):
+    try:
+        return json.load(open(path))
+    except Exception:
+        return {}
+
+claude = load(claude_path)
+openai = load(openai_path)
+alerts = load(alert_path) or {}
+windows_state = alerts.get("windows") or {}
+
+rl = claude.get("rate_limits") or {}
+five = rl.get("five_hour") or rl.get("fiveHour") or rl.get("session") or rl.get("current_session") or {}
+week = rl.get("seven_day") or rl.get("sevenDay") or rl.get("weekly") or rl.get("week") or {}
+codex = openai.get("codex") or {}
+
+targets = [
+    ("claude_5h", "Claude 5h", five.get("used_percentage"), five.get("resets_at")),
+    ("claude_week", "Claude week", week.get("used_percentage"), week.get("resets_at")),
+    ("codex_week", "Codex subscription", codex.get("used_percentage"), codex.get("resets_at")),
+]
+
+plan = []
+new_windows_state = dict(windows_state)
+for key, label, pct, resets_at in targets:
+    if pct is None:
+        continue
+    stored = windows_state.get(key) or {}
+    last_pct = stored.get("last_pct")
+    notified = list(stored.get("notified") or [])
+    message_ids = dict(stored.get("message_ids") or {})
+    # A real reset shows up as usage dropping meaningfully, not as resets_at
+    # changing (that field drifts every poll for rolling-window sources).
+    reset_detected = last_pct is not None and pct < last_pct - 5
+    delete_ids = []
+    if reset_detected:
+        delete_ids = list(message_ids.values())
+        notified = []
+        message_ids = {}
+    notify = [th for th in (85, 95) if pct >= th and th not in notified]
+    plan.append({
+        "key": key, "label": label, "pct": pct, "resets_at": resets_at,
+        "delete_message_ids": delete_ids, "notify_thresholds": notify,
+    })
+    new_windows_state[key] = {"resets_at": resets_at, "last_pct": pct, "notified": notified, "message_ids": message_ids}
+
+alerts["windows"] = new_windows_state
+with open(alert_path, "w", encoding="utf-8") as f:
+    json.dump(alerts, f, ensure_ascii=False, indent=2)
+    f.write("\n")
+
+print(json.dumps(plan))
+PY
+)"
+
+if [[ -n "$chat_id" ]]; then
+  echo "$alert_plan" | jq -c '.[]' 2>/dev/null | while read -r item; do
+    key="$(jq -r '.key' <<<"$item")"
+    label="$(jq -r '.label' <<<"$item")"
+    resets_at="$(jq -r '.resets_at // empty' <<<"$item")"
+
+    jq -r '.delete_message_ids[]?' <<<"$item" | while read -r del_id; do
+      [[ -n "$del_id" ]] && telegram_raw deleteMessage --data-urlencode "chat_id=$chat_id" --data-urlencode "message_id=$del_id" >/dev/null
+    done
+
+    jq -r '.notify_thresholds[]?' <<<"$item" | while read -r th; do
+      [[ -z "$th" ]] && continue
+      alert_text="⚠️ ${label}: ${th}% used"
+      if [[ -n "$resets_at" ]]; then
+        alert_text="${alert_text}, resets: ${resets_at}"
+      fi
+      resp="$(telegram sendMessage --data-urlencode "chat_id=$chat_id" --data-urlencode "text=$alert_text" --data-urlencode "disable_notification=false")"
+      mid="$(jq -r '.result.message_id // empty' <<<"$resp")"
+      if [[ -n "$mid" ]]; then
+        tmp_alert="$(mktemp)"
+        jq --arg key "$key" --arg th "$th" --argjson mid "$mid" \
+          '.windows[$key].message_ids[$th] = $mid | .windows[$key].notified = ((.windows[$key].notified // []) + [($th|tonumber)] | unique)' \
+          "$alert_state_file" > "$tmp_alert" && mv "$tmp_alert" "$alert_state_file"
+      fi
+    done
+  done
+fi
+
 text="$(
-  python3 - "$usage_file" <<'PY'
+  python3 - "$usage_file" "$openai_usage_file" "$anthropic_status_file" "$openai_status_file" <<'PY'
 import json, sys
 from datetime import datetime, timezone
 
 path = sys.argv[1]
+openai_path = sys.argv[2] if len(sys.argv) > 2 else None
+anthropic_status_path = sys.argv[3] if len(sys.argv) > 3 else None
+openai_status_path = sys.argv[4] if len(sys.argv) > 4 else None
 now = datetime.now(timezone.utc)
 
 def parse_dt(value):
@@ -291,7 +421,7 @@ def append_limit(lines, item):
 try:
     data = json.load(open(path))
 except FileNotFoundError:
-    print("5h: ? used · rst ?\nWeek: ? used · rst ?\n\n⏳ Status: waiting for Claude Code data\n✅ Updated: never\nSource: none")
+    print("5h: ? used · rst ?\nWeek: ? used · rst ?\n\n⏳ Status: waiting for Claude Code data\n✅ Updated: never")
     raise SystemExit
 
 captured = parse_dt(data.get("captured_at"))
@@ -346,13 +476,79 @@ else:
     lines.append("")
     lines.append("⏳ Status: waiting for official rate_limits")
 
+def fmt_reset_dt_short(iso_str):
+    dt = parse_dt(iso_str)
+    return fmt_reset_short(dt) if dt else "?"
+
+if openai_path:
+    try:
+        oai = json.load(open(openai_path))
+    except FileNotFoundError:
+        oai = None
+    if oai:
+        lines.append("")
+        lines.append("🤖 OpenAI")
+        codex = oai.get("codex")
+        if codex and codex.get("used_percentage") is not None:
+            pct = codex.get("used_percentage")
+            rst = fmt_reset_dt_short(codex.get("resets_at"))
+            lines.append(f"Codex (subscription): {pct:.0f}% used · rst {rst}")
+            credits = codex.get("free_reset_credits_available")
+            if credits:
+                lines.append(f"  ↳ free rate-limit resets available: {credits}")
+        elif oai.get("codex_error"):
+            lines.append("Codex (subscription): read error")
+        billing = oai.get("billing")
+        if billing and billing.get("today_usd") is not None:
+            total = billing["today_usd"]
+            by_model = billing.get("by_model_usd") or {}
+            top = ", ".join(f"{k} ${v:.2f}" for k, v in list(by_model.items())[:3])
+            suffix = f" ({top})" if top else ""
+            lines.append(f"API billing today: ${total:.2f}{suffix}")
+        elif oai.get("billing_error"):
+            lines.append("API billing: read error")
+
+def append_public_status(lines, label, path):
+    try:
+        service = json.load(open(path))
+    except (FileNotFoundError, json.JSONDecodeError):
+        service = None
+    if not service:
+        lines.append(f"🌐 {label}: ❔ status temporarily unavailable")
+        return
+
+    status = service.get("status") or {}
+    indicator = str(status.get("indicator") or "unknown").lower()
+    description = status.get("description") or "Unknown"
+    status_icons = {"none": "✅", "minor": "⚠️", "major": "🟠", "critical": "🔴"}
+    lines.append(f"🌐 {label}: {status_icons.get(indicator, '❔')} {description}")
+
+    # Healthy components stay silent; report only the concrete source of an issue.
+    component_icons = {
+        "degraded_performance": "⚠️",
+        "partial_outage": "🟠",
+        "major_outage": "🔴",
+        "under_maintenance": "🔧",
+    }
+    for component in service.get("components") or []:
+        comp_status = str(component.get("status") or "unknown")
+        if comp_status in component_icons:
+            lines.append(f"  {component_icons[comp_status]} {component.get('name')}: {comp_status.replace('_', ' ')}")
+
+    incidents = [item for item in (service.get("incidents") or []) if item.get("status") not in ("resolved", "postmortem")]
+    for incident in incidents[:3]:
+        lines.append(f"  ⚠️ Incident: {incident.get('name') or 'unknown'}")
+
+lines.append("")
+append_public_status(lines, "Anthropic", anthropic_status_path)
+append_public_status(lines, "OpenAI", openai_status_path)
+
 if captured:
     local = captured.astimezone().strftime("%H:%M")
     stale = " stale" if age is not None and age > 20 else ""
     lines.append(f"✅ Updated: {local} ({age}m ago){stale}")
 else:
     lines.append("✅ Updated: unknown")
-lines.append(f"Source: {source}")
 
 print("\n".join(lines))
 PY
