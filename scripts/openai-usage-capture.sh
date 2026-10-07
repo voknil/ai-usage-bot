@@ -75,15 +75,26 @@ if codex_ok:
         data = json.load(open(codex_path))
         entry = data[0] if isinstance(data, list) and data else {}
         usage = entry.get("usage") or {}
-        window = usage.get("secondary") or usage.get("primary") or usage.get("tertiary") or {}
+        # codexbar reports two independent rolling windows: "primary" is the
+        # 5-hour cap, "secondary" is the weekly cap. Keep both -- collapsing
+        # them into one (as this used to do) silently drops the 5h number.
+        primary = usage.get("primary") or {}
+        secondary = usage.get("secondary") or {}
         credits = (entry.get("credits") or {}).get("remaining")
         reset_credits = ((usage.get("codexResetCredits") or {}).get("availableCount"))
+
+        def window_payload(window):
+            return {
+                "used_percentage": window.get("usedPercent"),
+                "resets_at": window.get("resetsAt"),
+                "reset_description": window.get("resetDescription"),
+                "window_minutes": window.get("windowMinutes"),
+            }
+
         payload["codex"] = {
             "account_email": usage.get("accountEmail"),
-            "used_percentage": window.get("usedPercent"),
-            "resets_at": window.get("resetsAt"),
-            "reset_description": window.get("resetDescription"),
-            "window_minutes": window.get("windowMinutes"),
+            "five_hour": window_payload(primary),
+            "weekly": window_payload(secondary),
             "credits_remaining": credits,
             "free_reset_credits_available": reset_credits,
         }

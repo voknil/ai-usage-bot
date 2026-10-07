@@ -151,14 +151,17 @@ Adds a `🤖 OpenAI` block to the same status message:
 
 ```text
 🤖 OpenAI
-Codex (subscription): 41% used · rst Mon 08:00
+Codex 5h: 12% used · rst 16:34
+Codex week: 41% used · rst Mon 08:00
   ↳ free rate-limit resets available: 2
 API billing today: $2.19 (gpt-5.6-sol $2.15, gpt-5.6-luna $0.03)
 ```
 
 - **Codex subscription usage** comes from the [CodexBar](https://codexbar.app)
-  CLI (`codexbar usage --provider codex --format json`). Install and log it in
-  separately; if `codexbar` is not on `PATH`, this part is skipped silently.
+  CLI (`codexbar usage --provider codex --format json`), which reports both a
+  rolling 5-hour window and a weekly window; both are shown. Install and log
+  it in separately; if `codexbar` is not on `PATH`, this part is skipped
+  silently.
 - **API billing** comes from OpenAI's Usage/Costs API and needs an **Admin API
   key** (Settings -> Organization -> Admin keys on platform.openai.com),
   scoped to `api.usage.read` only. A regular `sk-proj-` key cannot read this
@@ -169,8 +172,8 @@ section is simply omitted if `openai-usage-capture.sh` never produces data).
 
 ## Threshold alerts (85% / 95%)
 
-Once any tracked window (Claude 5h, Claude week, Codex week) crosses 85% or
-95% used, the bot sends a separate one-off Telegram message for that
+Once any tracked window (Claude 5h, Claude week, Codex 5h, Codex week) crosses
+85% or 95% used, the bot sends a separate one-off Telegram message for that
 threshold. It will not repeat the same threshold again until the window's
 `resets_at` actually advances — at which point the earlier alert message(s)
 for that window are deleted automatically and the cycle starts fresh.

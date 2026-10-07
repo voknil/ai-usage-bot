@@ -159,11 +159,14 @@ rl = claude.get("rate_limits") or {}
 five = rl.get("five_hour") or rl.get("fiveHour") or rl.get("session") or rl.get("current_session") or {}
 week = rl.get("seven_day") or rl.get("sevenDay") or rl.get("weekly") or rl.get("week") or {}
 codex = openai.get("codex") or {}
+codex_5h = codex.get("five_hour") or {}
+codex_week = codex.get("weekly") or {}
 
 targets = [
     ("claude_5h", "Claude 5h", five.get("used_percentage"), five.get("resets_at")),
     ("claude_week", "Claude week", week.get("used_percentage"), week.get("resets_at")),
-    ("codex_week", "Codex subscription", codex.get("used_percentage"), codex.get("resets_at")),
+    ("codex_5h", "Codex 5h", codex_5h.get("used_percentage"), codex_5h.get("resets_at")),
+    ("codex_week", "Codex week", codex_week.get("used_percentage"), codex_week.get("resets_at")),
 ]
 
 plan = []
@@ -489,10 +492,17 @@ if openai_path:
         lines.append("")
         lines.append("🤖 OpenAI")
         codex = oai.get("codex")
-        if codex and codex.get("used_percentage") is not None:
-            pct = codex.get("used_percentage")
-            rst = fmt_reset_dt_short(codex.get("resets_at"))
-            lines.append(f"Codex (subscription): {pct:.0f}% used · rst {rst}")
+        codex_5h = (codex or {}).get("five_hour") or {}
+        codex_week = (codex or {}).get("weekly") or {}
+        if codex and (codex_5h.get("used_percentage") is not None or codex_week.get("used_percentage") is not None):
+            if codex_5h.get("used_percentage") is not None:
+                pct = codex_5h["used_percentage"]
+                rst = fmt_reset_dt_short(codex_5h.get("resets_at"))
+                lines.append(f"Codex 5h: {pct:.0f}% used · rst {rst}")
+            if codex_week.get("used_percentage") is not None:
+                pct = codex_week["used_percentage"]
+                rst = fmt_reset_dt_short(codex_week.get("resets_at"))
+                lines.append(f"Codex week: {pct:.0f}% used · rst {rst}")
             credits = codex.get("free_reset_credits_available")
             if credits:
                 lines.append(f"  ↳ free rate-limit resets available: {credits}")
