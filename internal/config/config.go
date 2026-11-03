@@ -166,7 +166,7 @@ func firstNonEmpty(vs ...string) string {
 // "export " prefix and single- or double-quoted values; nothing is expanded or
 // executed.
 func ParseDotenvFile(path string) (map[string]string, error) {
-	f, err := os.Open(path)
+	f, err := os.Open(path) //nolint:gosec // path is operator configuration (BOT_ENV)
 	if err != nil {
 		return nil, err
 	}

@@ -1,7 +1,0 @@
-[Unit]
-Description=Claude usage Telegram status update
-
-[Service]
-Type=oneshot
-WorkingDirectory=REPO_DIR
-ExecStart=REPO_DIR/scripts/telegram-claude-usage-status.sh

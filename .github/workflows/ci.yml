@@ -1,0 +1,69 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  lint:
+    name: Lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version: stable
+          cache: true
+      - uses: golangci/golangci-lint-action@v9
+        with:
+          version: v2.15
+
+  test:
+    name: Test (Go ${{ matrix.go }}, ${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+        go: ["1.22", "stable"]
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version: ${{ matrix.go }}
+          cache: true
+      - run: go vet ./...
+      - run: go build ./...
+      - name: Test with race detector and coverage
+        run: go test -race -count=1 -covermode=atomic -coverprofile=cover.out ./...
+      - name: Coverage summary
+        if: matrix.go == 'stable' && matrix.os == 'ubuntu-latest'
+        run: |
+          {
+            echo "### Test coverage"
+            echo '```'
+            go tool cover -func=cover.out | tail -n 1
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  vuln:
+    name: Vulnerability scan
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version: stable
+          cache: true
+      - run: go install golang.org/x/vuln/cmd/govulncheck@latest
+      - run: govulncheck ./...
