@@ -2,8 +2,13 @@
 .env.*
 !.env.example
 
-state/
-logs/
+# Runtime data (anchored: internal/state is source code)
+/state/
+/logs/
+
+/bin/
+/dist/
+cover.out
 
 .DS_Store
 *.log

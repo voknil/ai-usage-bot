@@ -1,0 +1,40 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
+  "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.example.ai-usage-bot</string>
+
+  <!-- Replace INSTALL_DIR with the directory that holds the binary, .env and state/. -->
+  <key>ProgramArguments</key>
+  <array>
+    <string>INSTALL_DIR/ai-usage-bot</string>
+    <string>run</string>
+  </array>
+
+  <key>WorkingDirectory</key>
+  <string>INSTALL_DIR</string>
+
+  <!-- launchd starts jobs with a minimal PATH; the bot must find `claude` and `codexbar`. -->
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>PATH</key>
+    <string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin</string>
+  </dict>
+
+  <key>RunAtLoad</key>
+  <true/>
+
+  <key>KeepAlive</key>
+  <true/>
+
+  <key>ThrottleInterval</key>
+  <integer>10</integer>
+
+  <key>StandardOutPath</key>
+  <string>INSTALL_DIR/logs/ai-usage-bot.log</string>
+  <key>StandardErrorPath</key>
+  <string>INSTALL_DIR/logs/ai-usage-bot.err.log</string>
+</dict>
+</plist>

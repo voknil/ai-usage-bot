@@ -1,0 +1,21 @@
+[Unit]
+Description=AI usage Telegram bot
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+# Replace INSTALL_DIR with the directory that holds the binary, .env and state/.
+WorkingDirectory=INSTALL_DIR
+ExecStart=INSTALL_DIR/ai-usage-bot run
+Restart=always
+RestartSec=10
+
+# The bot only needs to write its state directory.
+NoNewPrivileges=true
+ProtectSystem=strict
+ReadWritePaths=INSTALL_DIR
+PrivateTmp=true
+
+[Install]
+WantedBy=default.target

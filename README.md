@@ -1,215 +1,167 @@
-# Claude Usage Telegram Bot
+# ai-usage-bot
 
-A tiny Telegram status bot for Claude Code subscription usage.
+A small Telegram bot that keeps **one message** up to date with your AI subscription limits — Claude Code, Codex — plus today's OpenAI API spend and the providers' public status, and warns you before a limit runs out.
 
-It keeps one Telegram message updated instead of sending a stream of new messages. The first two lines are optimized for Telegram chat previews:
+[![CI](https://github.com/voknil/ai-usage-bot/actions/workflows/ci.yml/badge.svg)](https://github.com/voknil/ai-usage-bot/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+
+The first two lines are written for the chat list, so you can read the numbers without opening the chat:
 
 ```text
-5h: 13% used · rst 18:20
-Week: 53% used · rst Fri 08:00
+5h: 24% used · rst 11:30
+Week: 34% used · rst Fri 08:00
+
+Current session
+[####--------------] 24% used
+Resets: 11:30 (in 3h 13m)
+
+Weekly limits
+All models
+[######------------] 34% used
+Resets: 08:00 (in 71h 43m)
+
+🤖 OpenAI
+Codex 5h: 1% used · rst 13:00
+Codex week: 17% used · rst Wed 11:00
+API billing today: $2.19 (gpt-5 $2.15, gpt-5-mini $0.03)
+
+🌐 Anthropic: ✅ All Systems Operational
+🌐 OpenAI: ✅ All Systems Operational
+✅ Updated: 08:16 (0m ago)
 ```
 
-The message also includes progress bars, updated time, and an inline refresh button.
+An inline **↻ Обновить сейчас ✅** button refreshes everything on demand.
 
 ## Features
 
-- One persistent Telegram message, edited in place.
-- `↻ Обновить сейчас ✅` refresh button.
-- Button switches to `⏳ Обновляю...` while refresh is running.
-- Auto-refresh via launchd on macOS or systemd user timers on Linux.
-- Reads Claude Code usage from `claude /usage`.
-- Optional official `rate_limits` capture via Claude Code `statusLine`.
-- Optional Anthropic OAuth usage API fallback if your local credentials work.
-- Optional OpenAI section: Codex (ChatGPT) subscription usage via CodexBar, plus
-  pay-as-you-go API billing for the current day via the OpenAI Usage/Costs API.
-- Optional 85% / 95% threshold alerts as standalone messages for each tracked
-  window (Claude 5h, Claude week, Codex week), auto-deleted once that window
-  actually resets.
-- Public service health summary for Anthropic and OpenAI, with concrete
-  components and incidents shown only when there is a problem.
-- No credentials are committed; `.env`, `state/`, and `logs/` are gitignored.
+- **One message, edited in place** — no stream of notifications; it is only edited when something changed.
+- **Claude Code** limits (session, week, per-model) from the OAuth usage API, falling back to `claude /usage`.
+- **Codex** 5-hour and weekly limits through [CodexBar](https://codexbar.app), and **OpenAI API spend** for today through the organization costs API. Each part is optional and independent.
+- **Threshold alerts** (85 % and 95 % by default) as separate messages, retracted automatically when the window resets.
+- **Public status** of Anthropic and OpenAI; components and incidents are listed only when something is wrong.
+- **One static binary**, no dependencies, no runtime other than the tools it reads from. A failing source keeps its last good value instead of blanking the message.
+- **Safe by default**: the bot token is never logged, only the owner's chat can press the button, state files are private (`0600`), the `.env` file is parsed, not executed.
+- **`doctor`** command to see which source works without sending anything.
 
-## Requirements
+## Quick start
 
-- macOS or Linux.
-- `bash`, `curl`, `jq`, `python3`.
-- Claude Code CLI available as `claude`.
-- A Telegram bot token from BotFather.
+1. Create a bot with [@BotFather](https://t.me/BotFather) and copy the token.
+2. Get the binary — download from [Releases](https://github.com/voknil/ai-usage-bot/releases) or build it:
 
-## Setup
+   ```bash
+   git clone https://github.com/voknil/ai-usage-bot && cd ai-usage-bot
+   make build            # -> bin/ai-usage-bot
+   ```
 
-Clone the repo and create your env file:
+3. Configure:
 
-```bash
-cp .env.example .env
-nano .env
-```
+   ```bash
+   cp .env.example .env
+   $EDITOR .env          # set TELEGRAM_BOT_TOKEN
+   ```
 
-Set:
+4. Check that the sources work (sends nothing):
 
-```bash
-TELEGRAM_BOT_TOKEN='your-bot-token'
-```
+   ```bash
+   ./bin/ai-usage-bot doctor
+   ```
 
-Open the bot in Telegram and send `/start`.
+5. Run it, then open your bot in Telegram and send `/start`:
 
-Run once:
+   ```bash
+   ./bin/ai-usage-bot run
+   ```
 
-```bash
-./scripts/telegram-claude-usage-status.sh
-```
+The first private chat that sends `/start` becomes the owner. To avoid depending on who writes first, set `CHAT_ID` in `.env` (your ID is stored in `state/telegram-message.json` after the first `/start`).
 
-This creates the first status message and stores its `chat_id` and `message_id` in `state/telegram-message.json`.
+### Run it permanently
 
-Start callback polling for the refresh button:
+**macOS (launchd)** — copy `deploy/launchd/ai-usage-bot.plist`, replace `INSTALL_DIR` with the folder holding the binary, `.env` and `state/`, then:
 
 ```bash
-./scripts/telegram-claude-usage-callbacks.sh
+cp deploy/launchd/ai-usage-bot.plist ~/Library/LaunchAgents/com.example.ai-usage-bot.plist
+launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.example.ai-usage-bot.plist
 ```
 
-## Linux systemd
-
-The systemd units are user services. Copy the templates and replace `REPO_DIR` with the absolute path to this repo:
+**Linux (systemd, user service)** — copy `deploy/systemd/ai-usage-bot.service`, replace `INSTALL_DIR`, then:
 
 ```bash
 mkdir -p ~/.config/systemd/user
-cp systemd/claude-usage-status.service ~/.config/systemd/user/
-cp systemd/claude-usage-status.timer ~/.config/systemd/user/
-cp systemd/claude-usage-callbacks.service ~/.config/systemd/user/
-
-repo_dir="$PWD"
-sed -i "s|REPO_DIR|$repo_dir|g" ~/.config/systemd/user/claude-usage-status.service
-sed -i "s|REPO_DIR|$repo_dir|g" ~/.config/systemd/user/claude-usage-callbacks.service
-```
-
-Enable:
-
-```bash
+cp deploy/systemd/ai-usage-bot.service ~/.config/systemd/user/
 systemctl --user daemon-reload
-systemctl --user enable --now claude-usage-status.timer
-systemctl --user enable --now claude-usage-callbacks.service
+systemctl --user enable --now ai-usage-bot
+loginctl enable-linger "$USER"      # keep it running after logout
 ```
 
-The status timer runs every 60 seconds.
+Coming from the shell version? See [docs/migration.md](docs/migration.md) — your message, alerts and button keep working.
 
-If your user services stop when you log out, enable lingering:
+## Commands
 
-```bash
-loginctl enable-linger "$USER"
+| Command | Does |
+|---|---|
+| `ai-usage-bot run` | Refresh on a schedule and answer the button. The long-running mode. |
+| `ai-usage-bot once` | Refresh the message one time and exit. |
+| `ai-usage-bot doctor` | Read every source, print the result and a preview. Sends nothing. |
+| `ai-usage-bot version` | Print the version. |
+
+In the chat: `/start` (re)creates the status message, `/status` does the same.
+
+## Configuration
+
+Settings come from the environment and an optional `.env` file (`BOT_ENV` points elsewhere); the environment wins.
+
+| Variable | Default | Meaning |
+|---|---|---|
+| `TELEGRAM_BOT_TOKEN` | — *(required)* | Token from BotFather |
+| `CHAT_ID` | *(first `/start`)* | Pin the bot to one chat. Alias: `CLAUDE_STATUS_CHAT_ID` |
+| `STATE_DIR` | `state` | Where the small state files live |
+| `REFRESH_INTERVAL` | `1m` | How often to refresh |
+| `CACHE_TTL` | `4m` | How long a fetched value is reused |
+| `ALERT_THRESHOLDS` | `85,95` | Percentages that trigger a warning |
+| `CLAUDE_BIN` | *(from `PATH`)* | The `claude` executable |
+| `CLAUDE_CREDENTIALS_FILE` | `~/.claude/.credentials.json` | Where the OAuth token is read from, if present |
+| `CODEXBAR_BIN` | *(from `PATH`)* | The `codexbar` executable; without it the Codex lines are skipped |
+| `OPENAI_ADMIN_KEY` | *(empty)* | Enables API spend. Needs an **Admin** key with only `api.usage.read` |
+| `LOG_LEVEL` / `LOG_FORMAT` | `info` / `text` | `debug…error`; `text` or `json` |
+
+## How it works
+
+```
+ claude (API → CLI)  ─┐
+ codexbar / costs API ├─▶ cache ─▶ render ─▶ one Telegram message (edited in place)
+ status pages ────────┘      │
+                             └─▶ alerts ─▶ warning messages (deleted on reset)
+ Telegram updates ─▶ /start, refresh button
 ```
 
-## macOS launchd
-
-Copy the templates and replace `REPO_DIR` with the absolute path to this repo:
-
-```bash
-cp launchd/com.example.claude-usage-status.plist ~/Library/LaunchAgents/
-cp launchd/com.example.claude-usage-callbacks.plist ~/Library/LaunchAgents/
-```
-
-Then edit both copied files:
-
-```bash
-plutil -replace ProgramArguments.0 -string "$PWD/scripts/telegram-claude-usage-status.sh" ~/Library/LaunchAgents/com.example.claude-usage-status.plist
-plutil -replace WorkingDirectory -string "$PWD" ~/Library/LaunchAgents/com.example.claude-usage-status.plist
-plutil -replace StandardOutPath -string "$PWD/logs/status.log" ~/Library/LaunchAgents/com.example.claude-usage-status.plist
-plutil -replace StandardErrorPath -string "$PWD/logs/status.err.log" ~/Library/LaunchAgents/com.example.claude-usage-status.plist
-
-plutil -replace ProgramArguments.0 -string "$PWD/scripts/telegram-claude-usage-callbacks.sh" ~/Library/LaunchAgents/com.example.claude-usage-callbacks.plist
-plutil -replace WorkingDirectory -string "$PWD" ~/Library/LaunchAgents/com.example.claude-usage-callbacks.plist
-plutil -replace StandardOutPath -string "$PWD/logs/callbacks.log" ~/Library/LaunchAgents/com.example.claude-usage-callbacks.plist
-plutil -replace StandardErrorPath -string "$PWD/logs/callbacks.err.log" ~/Library/LaunchAgents/com.example.claude-usage-callbacks.plist
-```
-
-Load:
-
-```bash
-launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.example.claude-usage-status.plist
-launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.example.claude-usage-callbacks.plist
-```
-
-The status job runs every 60 seconds.
-
-## Optional Claude Code statusLine
-
-If Claude Code provides `rate_limits` in the statusLine payload, you can capture it:
-
-```json
-{
-  "statusLine": {
-    "type": "command",
-    "command": "/absolute/path/to/claude-usage-telegram-bot/scripts/claude-usage-statusline-capture.sh"
-  }
-}
-```
-
-When `rate_limits` are present, they are stored in `state/status.json` with source `official_rate_limits`.
-
-## Optional OpenAI section (Codex subscription + API billing)
-
-Adds a `🤖 OpenAI` block to the same status message:
-
-```text
-🤖 OpenAI
-Codex 5h: 12% used · rst 16:34
-Codex week: 41% used · rst Mon 08:00
-  ↳ free rate-limit resets available: 2
-API billing today: $2.19 (gpt-5.6-sol $2.15, gpt-5.6-luna $0.03)
-```
-
-- **Codex subscription usage** comes from the [CodexBar](https://codexbar.app)
-  CLI (`codexbar usage --provider codex --format json`), which reports both a
-  rolling 5-hour window and a weekly window; both are shown. Install and log
-  it in separately; if `codexbar` is not on `PATH`, this part is skipped
-  silently.
-- **API billing** comes from OpenAI's Usage/Costs API and needs an **Admin API
-  key** (Settings -> Organization -> Admin keys on platform.openai.com),
-  scoped to `api.usage.read` only. A regular `sk-proj-` key cannot read this
-  endpoint (403). Set `OPENAI_ADMIN_KEY` in `.env` to enable it.
-
-Both halves are independent — you can enable just one, or neither (the
-section is simply omitted if `openai-usage-capture.sh` never produces data).
-
-## Threshold alerts (85% / 95%)
-
-Once any tracked window (Claude 5h, Claude week, Codex 5h, Codex week) crosses
-85% or 95% used, the bot sends a separate one-off Telegram message for that
-threshold. It will not repeat the same threshold again until the window's
-`resets_at` actually advances — at which point the earlier alert message(s)
-for that window are deleted automatically and the cycle starts fresh.
-
-State for this lives in `state/usage-alerts.json`; delete it to reset alert
-history without affecting the main status message.
-
-## Public service status
-
-The status message also includes compact overall health lines from the public
-status pages:
-
-```text
-🌐 Anthropic: ✅ All Systems Operational
-🌐 OpenAI: ✅ All Systems Operational
-```
-
-Healthy components are not listed individually. If a provider reports a
-degraded component or an active incident, the affected source is shown below
-the provider line. The latest successful response is cached so a temporary
-status-page timeout does not break the bot.
-
-## Files
-
-- `scripts/claude-usage-cli-capture.sh` - runs `claude /usage` and writes normalized JSON.
-- `scripts/claude-usage-api-capture.sh` - optional OAuth API capture.
-- `scripts/claude-usage-statusline-capture.sh` - optional statusLine capture.
-- `scripts/openai-usage-capture.sh` - optional Codex subscription + OpenAI API billing capture.
-- `scripts/claude-service-status-capture.sh` - public Anthropic service status capture.
-- `scripts/openai-service-status-capture.sh` - public OpenAI service status capture.
-- `scripts/telegram-claude-usage-status.sh` - creates/edits the Telegram status message, and sends/prunes threshold alerts.
-- `scripts/telegram-claude-usage-callbacks.sh` - handles the inline refresh button.
+One process does everything: a ticker refreshes stale sources, the update loop long-polls Telegram, and a mutex keeps the two from racing. Details and design decisions are in [docs/architecture.md](docs/architecture.md).
 
 ## Security
 
-Do not commit `.env`, `state/`, `logs/`, or Claude credentials. The repo ignores them by default.
-The `OPENAI_ADMIN_KEY`, if you set one, should be scoped to `api.usage.read`
-only — it cannot spend money or change account settings with that scope, but
-treat it like any other secret and never commit it.
+- The bot token is only ever part of the request URL to `api.telegram.org` (Telegram's design) and is scrubbed from every error message.
+- Button presses and commands are accepted from the owner's chat only.
+- `OPENAI_ADMIN_KEY` should be scoped to `api.usage.read`: it can read usage, not spend money or change settings.
+- `.env`, `state/` and `logs/` are git-ignored. Do not commit them.
+- Report vulnerabilities as described in [SECURITY.md](SECURITY.md).
+
+## Development
+
+```bash
+make check     # vet + golangci-lint + tests with the race detector
+make cover     # coverage summary
+make doctor    # build and run the doctor against your real sources
+```
+
+Go 1.22 or newer. Every provider is a small package with its own parser tests; the Telegram flow is tested end to end against a fake Bot API. See [CONTRIBUTING.md](CONTRIBUTING.md) to add a provider.
+
+## License
+
+MIT. See [LICENSE](LICENSE).
+
+---
+
+## По-русски
+
+`ai-usage-bot` держит в Telegram **одно сообщение** с лимитами ваших AI-подписок (Claude Code, Codex), расходом OpenAI API за сегодня и статусом сервисов, а при приближении к лимиту присылает предупреждение (по умолчанию на 85 % и 95 %). Кнопка «↻ Обновить сейчас» обновляет всё немедленно.
+
+Быстрый старт: создайте бота у @BotFather, положите токен в `.env` (`TELEGRAM_BOT_TOKEN`), проверьте источники командой `ai-usage-bot doctor`, запустите `ai-usage-bot run` и отправьте боту `/start`. Для постоянной работы — шаблоны в `deploy/` (launchd на macOS, systemd на Linux). С версии на shell можно перейти без потери сообщения и истории алертов: см. [docs/migration.md](docs/migration.md).
