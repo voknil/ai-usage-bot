@@ -31,8 +31,26 @@ type Config struct {
 	CodexBarBin     string
 	OpenAIAdminKey  string
 
+	// Providers, when non-empty, lists exactly the usage providers to enable
+	// ("claude", "openai"); empty means detect what is installed.
+	Providers []string
+
 	LogLevel  string
 	LogFormat string
+}
+
+// Enabled reports whether a provider should run: explicitly listed, or — with no
+// explicit list — detected as available.
+func (c *Config) Enabled(name string, detected bool) bool {
+	if len(c.Providers) == 0 {
+		return detected
+	}
+	for _, p := range c.Providers {
+		if p == name {
+			return true
+		}
+	}
+	return false
 }
 
 // Load reads settings. Process environment wins over the dotenv file, whose
@@ -107,6 +125,16 @@ func FromLookup(get func(string) string) (*Config, error) {
 	c.CredentialsFile = firstNonEmpty(get("CLAUDE_CREDENTIALS_FILE"), defaultCredentials())
 	c.CodexBarBin = get("CODEXBAR_BIN")
 	c.OpenAIAdminKey = strings.TrimSpace(get("OPENAI_ADMIN_KEY"))
+	for _, p := range strings.Split(get("PROVIDERS"), ",") {
+		p = strings.ToLower(strings.TrimSpace(p))
+		if p == "" || p == "auto" {
+			continue
+		}
+		if p != "claude" && p != "openai" {
+			return nil, fmt.Errorf("PROVIDERS: unknown provider %q (known: claude, openai)", p)
+		}
+		c.Providers = append(c.Providers, p)
+	}
 	c.LogLevel = firstNonEmpty(get("LOG_LEVEL"), c.LogLevel)
 	c.LogFormat = firstNonEmpty(get("LOG_FORMAT"), c.LogFormat)
 	return c, nil

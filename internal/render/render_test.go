@@ -18,6 +18,7 @@ func at(h, m int, day int) time.Time { return time.Date(2026, 11, day, h, m, 0, 
 
 func full() Snapshot {
 	return Snapshot{
+		ClaudeEnabled: true,
 		Claude: &usage.Claude{
 			CapturedAt: at(9, 20, 3),
 			Session:    &usage.Window{Label: "Current session", Percent: 19, ResetsAt: at(11, 30, 3)},
@@ -78,7 +79,7 @@ func TestPreviewLinesComeFirst(t *testing.T) {
 }
 
 func TestNoClaudeData(t *testing.T) {
-	got := Status(Snapshot{}, now, msk)
+	got := Status(Snapshot{ClaudeEnabled: true}, now, msk)
 	want := "5h: ? used · rst ?\nWeek: ? used · rst ?\n\n⏳ Status: waiting for Claude Code data\n✅ Updated: never"
 	if got != want {
 		t.Errorf("got\n%s", got)
@@ -86,7 +87,7 @@ func TestNoClaudeData(t *testing.T) {
 }
 
 func TestMissingWindows(t *testing.T) {
-	s := Snapshot{Claude: &usage.Claude{CapturedAt: at(9, 20, 3)}}
+	s := Snapshot{ClaudeEnabled: true, Claude: &usage.Claude{CapturedAt: at(9, 20, 3)}}
 	got := Status(s, now, msk)
 	for _, must := range []string{"Current session: unknown", "Weekly limits\nunknown"} {
 		if !strings.Contains(got, must) {
@@ -175,5 +176,66 @@ func TestAlertText(t *testing.T) {
 	}
 	if got := Alert(alerts.Notice{Label: "X", Threshold: 92.5}, msk); got != "⚠️ X: 92.5% used" {
 		t.Errorf("alert without reset = %q", got)
+	}
+}
+
+func codexOnly() Snapshot {
+	return Snapshot{
+		OpenAI: &usage.OpenAI{
+			CapturedAt: at(9, 20, 3),
+			Codex: &usage.Codex{
+				Session:    &usage.Window{Percent: 4, ResetsAt: at(13, 0, 3)},
+				Week:       &usage.Window{Percent: 16, ResetsAt: at(11, 0, 4)},
+				FreeResets: 1,
+			},
+			Billing: &usage.Billing{TodayUSD: 1.5},
+		},
+	}
+}
+
+// A user with only OpenAI must not see anything about Claude, and the chat
+// preview must show the Codex numbers instead.
+func TestOnlyOpenAI(t *testing.T) {
+	want := `Codex 5h: 4% used · rst 13:00
+Codex week: 16% used · rst Wed 11:00
+
+🤖 OpenAI
+  ↳ free rate-limit resets available: 1
+API billing today: $1.50
+✅ Updated: 09:20 (5m ago)`
+	got := Status(codexOnly(), now, msk)
+	if got != want {
+		t.Errorf("got\n%s\n--- want ---\n%s", got, want)
+	}
+	for _, mustNot := range []string{"Claude", "5h: ?", "waiting"} {
+		if strings.Contains(got, mustNot) {
+			t.Errorf("unexpected %q in\n%s", mustNot, got)
+		}
+	}
+}
+
+func TestOnlyClaude(t *testing.T) {
+	s := full()
+	s.OpenAI = nil
+	s.Services = nil
+	got := Status(s, now, msk)
+	if !strings.HasPrefix(got, "5h: 19% used") || strings.Contains(got, "OpenAI") || strings.Contains(got, "Codex") {
+		t.Errorf("claude-only message wrong:\n%s", got)
+	}
+}
+
+func TestNothingConfigured(t *testing.T) {
+	got := Status(Snapshot{}, now, msk)
+	if !strings.Contains(got, "No data sources are configured") || strings.Contains(got, "Updated") {
+		t.Errorf("got %q", got)
+	}
+}
+
+func TestOnlyStatusPages(t *testing.T) {
+	s := Snapshot{Services: full().Services}
+	got := Status(s, now, msk)
+	want := "🌐 Anthropic: ✅ All Systems Operational\n🌐 OpenAI: ✅ All Systems Operational\n✅ Updated: 09:25"
+	if got != want {
+		t.Errorf("got\n%s", got)
 	}
 }

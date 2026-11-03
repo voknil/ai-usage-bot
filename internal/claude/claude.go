@@ -46,6 +46,23 @@ func New(bin, credentialsFile string) *Client {
 	}
 }
 
+// Available reports whether Claude Code looks installed or logged in here:
+// the executable is configured or on PATH, or the credentials file exists.
+func (c *Client) Available() bool {
+	if c.Bin != "" {
+		return true
+	}
+	if _, err := exec.LookPath("claude"); err == nil {
+		return true
+	}
+	if c.CredentialsFile != "" {
+		if _, err := os.Stat(c.CredentialsFile); err == nil {
+			return true
+		}
+	}
+	return false
+}
+
 // Fetch returns current usage: the API first, the CLI as fallback. The error
 // joins both failures when neither works.
 func (c *Client) Fetch(ctx context.Context) (*usage.Claude, error) {

@@ -35,6 +35,7 @@ An inline **↻ Обновить сейчас ✅** button refreshes everything 
 ## Features
 
 - **One message, edited in place** — no stream of notifications; it is only edited when something changed.
+- **Every provider is optional.** Only have Claude Code, only Codex, or only an OpenAI key? The bot detects what is installed and shows just that; with nothing found it still shows the providers' public status. Set `PROVIDERS` to override the detection.
 - **Claude Code** limits (session, week, per-model) from the OAuth usage API, falling back to `claude /usage`.
 - **Codex** 5-hour and weekly limits through [CodexBar](https://codexbar.app), and **OpenAI API spend** for today through the organization costs API. Each part is optional and independent.
 - **Threshold alerts** (85 % and 95 % by default) as separate messages, retracted automatically when the window resets.
@@ -95,6 +96,17 @@ loginctl enable-linger "$USER"      # keep it running after logout
 
 Coming from the shell version? See [docs/migration.md](docs/migration.md) — your message, alerts and button keep working.
 
+### Supported providers
+
+| Provider | What is read | Needs |
+|---|---|---|
+| Claude Code | session, weekly and per-model limits | the `claude` CLI, or its OAuth credentials file |
+| Codex (ChatGPT) | 5-hour and weekly limits | the [CodexBar](https://codexbar.app) CLI |
+| OpenAI API | today's spend, by model | `OPENAI_ADMIN_KEY` |
+| Anthropic / OpenAI status | overall health, degraded components, incidents | nothing |
+
+Other providers (Kimi, Gemini, …) are not supported yet. Adding one is a small package; see [CONTRIBUTING.md](CONTRIBUTING.md) and [docs/architecture.md](docs/architecture.md), or open a feature request with a link to where the provider exposes its usage.
+
 ## Commands
 
 | Command | Does |
@@ -118,6 +130,7 @@ Settings come from the environment and an optional `.env` file (`BOT_ENV` points
 | `REFRESH_INTERVAL` | `1m` | How often to refresh |
 | `CACHE_TTL` | `4m` | How long a fetched value is reused |
 | `ALERT_THRESHOLDS` | `85,95` | Percentages that trigger a warning |
+| `PROVIDERS` | `auto` | `auto` detects what is installed; or list exactly `claude`, `openai` (comma-separated) |
 | `CLAUDE_BIN` | *(from `PATH`)* | The `claude` executable |
 | `CLAUDE_CREDENTIALS_FILE` | `~/.claude/.credentials.json` | Where the OAuth token is read from, if present |
 | `CODEXBAR_BIN` | *(from `PATH`)* | The `codexbar` executable; without it the Codex lines are skipped |

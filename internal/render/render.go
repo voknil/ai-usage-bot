@@ -30,9 +30,12 @@ type ServiceView struct {
 
 // Snapshot is everything the message shows.
 type Snapshot struct {
-	Claude   *usage.Claude
-	OpenAI   *usage.OpenAI
-	Services []ServiceView
+	// ClaudeEnabled says Claude is a configured source; when false its section
+	// is left out entirely instead of showing "waiting for data".
+	ClaudeEnabled bool
+	Claude        *usage.Claude
+	OpenAI        *usage.OpenAI
+	Services      []ServiceView
 }
 
 // Status renders the status message. now and loc fix the clock and time zone.
@@ -60,50 +63,75 @@ func (r renderer) status(s Snapshot) string {
 	var lines []string
 	c := s.Claude
 
-	var session, week *usage.Window
-	if c != nil {
-		session, week = c.Session, c.Week
+	// The first two lines are what the chat list previews. They show Claude when
+	// it is configured, otherwise Codex, otherwise nothing.
+	codexInHeader := false
+	switch {
+	case s.ClaudeEnabled:
+		var session, week *usage.Window
+		if c != nil {
+			session, week = c.Session, c.Week
+		}
+		lines = append(lines, r.topLine("5h", session), r.topLine("Week", week))
+	case s.OpenAI != nil && s.OpenAI.Codex != nil:
+		codex := s.OpenAI.Codex
+		lines = append(lines, r.topLine("Codex 5h", codex.Session), r.topLine("Codex week", codex.Week))
+		codexInHeader = true
 	}
-	lines = append(lines, r.topLine("5h", session), r.topLine("Week", week))
 
-	if c == nil {
-		lines = append(lines, "", "⏳ Status: waiting for Claude Code data")
-	} else {
-		lines = append(lines, "")
-		if session != nil {
-			lines = append(lines, r.block(*session)...)
+	if s.ClaudeEnabled {
+		if c == nil {
+			lines = append(lines, "", "⏳ Status: waiting for Claude Code data")
 		} else {
-			lines = append(lines, "Current session: unknown")
-		}
-		lines = append(lines, "", "Weekly limits")
-		if week != nil {
-			lines = append(lines, r.block(*week)...)
-		}
-		for _, w := range c.Others {
 			lines = append(lines, "")
-			lines = append(lines, r.block(w)...)
-		}
-		if week == nil && len(c.Others) == 0 {
-			lines = append(lines, "unknown")
+			lines = append(lines, r.claudeDetail(c)...)
 		}
 	}
 
 	if s.OpenAI != nil {
-		if section := r.openAI(s.OpenAI); len(section) > 0 {
-			lines = append(lines, "")
+		if section := r.openAI(s.OpenAI, codexInHeader); len(section) > 0 {
+			if len(lines) > 0 {
+				lines = append(lines, "")
+			}
 			lines = append(lines, section...)
 		}
 	}
 
 	if len(s.Services) > 0 {
-		lines = append(lines, "")
+		if len(lines) > 0 {
+			lines = append(lines, "")
+		}
 		for _, sv := range s.Services {
 			lines = append(lines, r.service(sv)...)
 		}
 	}
 
-	lines = append(lines, r.footer(c))
+	if len(lines) == 0 {
+		return "No data sources are configured yet.\nRun `ai-usage-bot doctor` on the host to see what is missing."
+	}
+	lines = append(lines, r.footer(s))
 	return strings.Join(lines, "\n")
+}
+
+func (r renderer) claudeDetail(c *usage.Claude) []string {
+	var lines []string
+	if c.Session != nil {
+		lines = append(lines, r.block(*c.Session)...)
+	} else {
+		lines = append(lines, "Current session: unknown")
+	}
+	lines = append(lines, "", "Weekly limits")
+	if c.Week != nil {
+		lines = append(lines, r.block(*c.Week)...)
+	}
+	for _, w := range c.Others {
+		lines = append(lines, "")
+		lines = append(lines, r.block(w)...)
+	}
+	if c.Week == nil && len(c.Others) == 0 {
+		lines = append(lines, "unknown")
+	}
+	return lines
 }
 
 func (r renderer) topLine(label string, w *usage.Window) string {
@@ -121,13 +149,13 @@ func (r renderer) block(w usage.Window) []string {
 	return out
 }
 
-func (r renderer) openAI(o *usage.OpenAI) []string {
+func (r renderer) openAI(o *usage.OpenAI, codexInHeader bool) []string {
 	var lines []string
 	if c := o.Codex; c != nil {
-		if c.Session != nil {
+		if c.Session != nil && !codexInHeader {
 			lines = append(lines, fmt.Sprintf("Codex 5h: %.0f%% used · rst %s", c.Session.Percent, r.resetShort(c.Session.ResetsAt)))
 		}
-		if c.Week != nil {
+		if c.Week != nil && !codexInHeader {
 			lines = append(lines, fmt.Sprintf("Codex week: %.0f%% used · rst %s", c.Week.Percent, r.resetShort(c.Week.ResetsAt)))
 		}
 		if c.FreeResets > 0 {
@@ -205,22 +233,31 @@ func (r renderer) service(sv ServiceView) []string {
 	return lines
 }
 
-func (r renderer) footer(c *usage.Claude) string {
-	if c == nil {
-		return "✅ Updated: never"
+// footer shows when the data was captured: the newest of the usage sources.
+func (r renderer) footer(s Snapshot) string {
+	var at time.Time
+	if s.Claude != nil {
+		at = s.Claude.CapturedAt
 	}
-	if c.CapturedAt.IsZero() {
-		return "✅ Updated: unknown"
+	if s.OpenAI != nil && s.OpenAI.CapturedAt.After(at) {
+		at = s.OpenAI.CapturedAt
 	}
-	age := int(r.now.Sub(c.CapturedAt).Minutes())
+	if at.IsZero() {
+		if s.ClaudeEnabled {
+			return "✅ Updated: never"
+		}
+		// Only status pages: say when this message was last rendered.
+		return "✅ Updated: " + r.now.Format("15:04")
+	}
+	age := int(r.now.Sub(at).Minutes())
 	if age < 0 {
 		age = 0
 	}
 	stale := ""
-	if r.now.Sub(c.CapturedAt) > staleAfter {
+	if r.now.Sub(at) > staleAfter {
 		stale = " stale"
 	}
-	return fmt.Sprintf("✅ Updated: %s (%dm ago)%s", c.CapturedAt.In(r.loc).Format("15:04"), age, stale)
+	return fmt.Sprintf("✅ Updated: %s (%dm ago)%s", at.In(r.loc).Format("15:04"), age, stale)
 }
 
 // resetShort is "18:20" for today and "Fri 08:00" otherwise.
