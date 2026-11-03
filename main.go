@@ -81,6 +81,9 @@ func execute(ctx context.Context, cmd string, cfg *config.Config, log *slog.Logg
 		return doctor(ctx, src)
 	}
 
+	if src.Claude == nil && src.OpenAI == nil {
+		log.Warn("no usage providers found: only service status will be shown; run `ai-usage-bot doctor`")
+	}
 	b, err := bot.New(telegram.New(cfg.TelegramToken), src, bot.Options{
 		ChatID:          cfg.ChatID,
 		RefreshInterval: cfg.RefreshInterval,
@@ -100,13 +103,14 @@ func execute(ctx context.Context, cmd string, cfg *config.Config, log *slog.Logg
 	return b.Run(ctx)
 }
 
-// sources wires the providers the configuration enables.
+// sources wires the providers that are enabled: listed in PROVIDERS, or — by
+// default — detected as installed. Status pages need nothing and are always on.
 func sources(cfg *config.Config) bot.Sources {
-	cl := claude.New(cfg.ClaudeBin, cfg.CredentialsFile)
-	src := bot.Sources{
-		Claude: cl.Fetch,
+	var src bot.Sources
+	if cl := claude.New(cfg.ClaudeBin, cfg.CredentialsFile); cfg.Enabled("claude", cl.Available()) {
+		src.Claude = cl.Fetch
 	}
-	if oa := openai.New(cfg.CodexBarBin, cfg.OpenAIAdminKey); oa.Configured() {
+	if oa := openai.New(cfg.CodexBarBin, cfg.OpenAIAdminKey); cfg.Enabled("openai", oa.Configured()) {
 		src.OpenAI = oa.Fetch
 	}
 	for _, p := range []struct{ name, url string }{
@@ -133,6 +137,7 @@ func doctor(ctx context.Context, src bot.Sources) error {
 		fmt.Printf("✓ %-12s ok\n", name)
 	}
 
+	snap.ClaudeEnabled = src.Claude != nil
 	if src.Claude != nil {
 		v, err := src.Claude(ctx)
 		report("claude", err)
@@ -140,6 +145,8 @@ func doctor(ctx context.Context, src bot.Sources) error {
 			snap.Claude = v
 			fmt.Printf("  source: %s\n", v.Source)
 		}
+	} else {
+		fmt.Println("- claude       not found (no `claude` on PATH, no credentials file); skipped")
 	}
 	if src.OpenAI != nil {
 		v, err := src.OpenAI(ctx)
@@ -148,7 +155,7 @@ func doctor(ctx context.Context, src bot.Sources) error {
 			snap.OpenAI = v
 		}
 	} else {
-		fmt.Println("- openai       not configured (no codexbar on PATH, no OPENAI_ADMIN_KEY)")
+		fmt.Println("- openai       not configured (no codexbar on PATH, no OPENAI_ADMIN_KEY); skipped")
 	}
 	for _, s := range src.Services {
 		v, err := s.Fetch(ctx)

@@ -136,3 +136,25 @@ func TestLoadPrefersProcessEnvironment(t *testing.T) {
 		t.Errorf("env must win, file fills gaps: %+v", c)
 	}
 }
+
+func TestProviders(t *testing.T) {
+	base := map[string]string{"TELEGRAM_BOT_TOKEN": "1:abc"}
+	c, _ := FromLookup(lookup(base))
+	if !c.Enabled("claude", true) || c.Enabled("claude", false) {
+		t.Error("with no list, detection decides")
+	}
+
+	base["PROVIDERS"] = "OpenAI, auto"
+	c, err := FromLookup(lookup(base))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c.Enabled("claude", true) || !c.Enabled("openai", false) {
+		t.Errorf("an explicit list overrides detection: %+v", c.Providers)
+	}
+
+	base["PROVIDERS"] = "claude,kimi"
+	if _, err := FromLookup(lookup(base)); err == nil {
+		t.Error("an unknown provider must be rejected")
+	}
+}

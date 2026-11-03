@@ -188,7 +188,7 @@ func (b *Bot) fetchAll(ctx context.Context, force bool) {
 }
 
 func (b *Bot) snapshot() render.Snapshot {
-	s := render.Snapshot{Claude: b.claude.val, OpenAI: b.openai.val}
+	s := render.Snapshot{ClaudeEnabled: b.src.Claude != nil, Claude: b.claude.val, OpenAI: b.openai.val}
 	for i, src := range b.src.Services {
 		s.Services = append(s.Services, render.ServiceView{Name: src.Name, Svc: b.services[i].val})
 	}

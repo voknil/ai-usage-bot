@@ -6,6 +6,14 @@ the project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Fixed
+- Providers are optional: with no Claude Code installed the bot no longer shows "waiting for Claude Code data"
+  and `doctor` no longer fails. The chat preview shows Codex when Claude is absent, and a message with no usage
+  provider shows the public status pages (or a hint to run `doctor`).
+
+### Added
+- `PROVIDERS` setting to choose providers explicitly instead of detecting them.
+
 ### Changed
 - **Rewritten in Go.** One static binary (`run`, `once`, `doctor`, `version`) replaces the shell scripts,
   Python and `jq`; the two background jobs become a single process.

@@ -141,3 +141,16 @@ func TestFetchBothFail(t *testing.T) {
 		t.Fatal("expected an error when every source fails")
 	}
 }
+
+func TestAvailable(t *testing.T) {
+	t.Setenv("PATH", t.TempDir())
+	if New("", filepath.Join(t.TempDir(), "none.json")).Available() {
+		t.Error("nothing installed must report unavailable")
+	}
+	if !New("/x/claude", "").Available() {
+		t.Error("a configured binary counts as available")
+	}
+	if !New("", credsFile(t, "tok")).Available() {
+		t.Error("an existing credentials file counts as available")
+	}
+}
