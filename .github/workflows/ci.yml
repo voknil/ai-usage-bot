@@ -36,6 +36,10 @@ jobs:
       matrix:
         os: [ubuntu-latest, macos-latest]
         go: ["1.22", "stable"]
+        exclude:
+          # Go 1.22 binaries do not start on current macOS ("missing LC_UUID load command").
+          - os: macos-latest
+            go: "1.22"
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-go@v7
